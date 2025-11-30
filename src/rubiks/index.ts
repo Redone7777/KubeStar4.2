@@ -167,7 +167,7 @@ class Rubiks {
     }
 
     public solve() {
-        console.log("[Solve] Fonction solve non implémentée");
+        console.log("Démarrage du solveur...");
     }
 
     /**

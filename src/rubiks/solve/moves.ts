@@ -93,17 +93,3 @@ export function movesToString(moves: Move[]): string {
 export function parseScramble(str: string): Move[] {
     return str.trim().split(/\s+/).filter(s => s) as Move[];
 }
-
-export function randomScramble(length: number): Move[] {
-    const moves: Move[] = [];
-    let lastMove: Move | null = null;
-    
-    for (let i = 0; i < length; i++) {
-        const valid = getValidMoves(lastMove);
-        const move = valid[Math.floor(Math.random() * valid.length)];
-        moves.push(move);
-        lastMove = move;
-    }
-    
-    return moves;
-}
