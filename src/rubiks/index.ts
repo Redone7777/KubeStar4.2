@@ -4,10 +4,11 @@ import createScene from "./components/scene";
 import createRenderer from "./components/renderer";
 import {Cube} from "./core/cube";
 import Control, {MouseControl, TouchControl} from "./core/control";
-import { selfTest } from "./core/testLogic";
+import { solveIDAStar } from "./solve/solveIDAStar";
+import { CubeState } from "./solve/types";
+import { statusPanel } from "./util/statusPanel";
 
 export * from "./core/cubeLogic";
-export { selfTest };
 
 const setSize = (container: Element, camera: PerspectiveCamera, renderer: WebGLRenderer) => {
     camera.aspect = container.clientWidth / container.clientHeight;
@@ -58,13 +59,10 @@ class Rubiks {
         const winH = this.renderer.domElement.clientHeight;
         const coarseSize = cube.getCoarseCubeSize(this.camera, {w: winW, h: winH});
 
-        // Ratio plus grand = cube plus petit (plus éloigné)
         const ratio = Math.max(3.0 / (winW / coarseSize), 3.0 / (winH / coarseSize));
         this.camera.position.z *= ratio;
-        
-        // Décaler la caméra légèrement vers le haut pour que le cube paraisse centré
-        // (compense la barre de navigation en haut)
         this.camera.position.y = 0.4;
+        
         this._controls.push(
             new MouseControl(this.camera, this.scene, this.renderer, cube),
             new TouchControl(this.camera, this.scene, this.renderer, cube)
@@ -73,31 +71,28 @@ class Rubiks {
         this.render();
     }
 
-    /**
-     * Mélanger le cube avec des mouvements aléatoires animés
-     * @param numMoves Nombre de mouvements (défaut: 20)
-     */
+    private shuffleTotalMoves: number = 0;
+    private shuffleCurrentMove: number = 0;
+
     public disorder(numMoves: number = 20) {
         if (this.cube && !this.isShuffling) {
             this.isShuffling = true;
+            this.shuffleTotalMoves = numMoves;
+            this.shuffleCurrentMove = 0;
+            statusPanel.showShuffling(0, numMoves);
             
             this.performAnimatedRandomMoves(numMoves, -1, () => {
                 this.isShuffling = false;
+                statusPanel.showShuffleComplete(this.shuffleTotalMoves);
                 console.log(`Mélange terminé (${numMoves} mouvements).`);
             });
         }
     }
 
-    /**
-     * Alias pour disorder - mélange le cube avec n mouvements
-     */
     public scramble(numMoves: number = 10) {
         this.disorder(numMoves);
     }
 
-    /**
-     * Effectuer des mouvements aléatoires animés sur le cube
-     */
     private performAnimatedRandomMoves(numMoves: number, lastAxisIndex: number, callback: () => void) {
         if (!this.cube || numMoves <= 0) {
             callback();
@@ -105,121 +100,141 @@ class Rubiks {
         }
 
         const order = this.cube.order;
-        
-        // Choisir un axe aléatoire (différent du dernier pour plus de variété)
         let axisIndex: number;
         do {
             axisIndex = Math.floor(Math.random() * 3);
         } while (axisIndex === lastAxisIndex && numMoves > 1);
         
-        // Choisir une couche aléatoire
         const layerIndex = Math.floor(Math.random() * order);
-        
-        // Choisir un sens de rotation aléatoire
         const clockwise = Math.random() > 0.5;
 
-        // Effectuer la rotation animée
-        this.cube.performAnimatedRotation(axisIndex, layerIndex, clockwise, () => {
+        this.cube.performAnimatedRotation(axisIndex, layerIndex, clockwise, 1, () => {
             this.render();
-            // Passer au mouvement suivant
+            this.shuffleCurrentMove++;
+            statusPanel.showShuffling(this.shuffleCurrentMove, this.shuffleTotalMoves);
             this.performAnimatedRandomMoves(numMoves - 1, axisIndex, callback);
         });
     }
 
-    /**
-     * Réinitialiser le cube à son état résolu
-     */
     public restore() {
         if (this.cube) {
             this.cube.restore();
             this.render();
-        } else {
-            console.error("ERREUR_REINIT: this.cube est undefined.");
+            statusPanel.reset();
         }
     }
 
-    /**
-     * Zoomer (rapprocher la caméra)
-     */
     public zoomIn() {
         const minZ = 5;
         if (this.camera.position.z > minZ) {
             this.camera.position.z *= 0.9;
-            if (this.camera.position.z < minZ) {
-                this.camera.position.z = minZ;
-            }
+            if (this.camera.position.z < minZ) this.camera.position.z = minZ;
             this.render();
         }
     }
 
-    /**
-     * Dézoomer (éloigner la caméra)
-     */
     public zoomOut() {
         const maxZ = 50;
         if (this.camera.position.z < maxZ) {
             this.camera.position.z *= 1.1;
-            if (this.camera.position.z > maxZ) {
-                this.camera.position.z = maxZ;
-            }
+            if (this.camera.position.z > maxZ) this.camera.position.z = maxZ;
             this.render();
         }
     }
 
-    public solve() {
-        console.log("Démarrage du solveur...");
-    }
+    private solutionMoves: string[] = [];
+    private solutionCurrentMove: number = 0;
 
-    /**
-     * Exécute une séquence de mouvements sur le cube 3D
-     * Exemple: executeMoves(["R", "U", "R'", "U'"])
-     */
-    public executeMoves(moves: string[], callback?: () => void) {
+    public solve() {
         if (!this.cube || this.isShuffling || this.isSolving) {
-            console.warn("Cube occupé ou non initialisé");
+            console.warn("Cube occupé.");
             return;
         }
+
+        const logicState = this.cube.getLogicState();
+        if (!logicState) return;
+
+        const solveState: CubeState = {
+            cp: logicState.cornerPerm,
+            co: logicState.cornerOri,
+        };
+
+        console.log("Lancement IDA* sur l'état:", solveState);
+        this.isSolving = true;
+        statusPanel.showSolving();
+
+        setTimeout(() => {
+            const result = solveIDAStar(solveState);
+    
+            if (result && result.moves.length > 0) {
+                console.log(`✅ Solution: ${result.moves.join(' ')} (${result.timeMs.toFixed(2)}ms)`);
+                
+                // Afficher la solution trouvée
+                statusPanel.showSolutionFound({
+                    moves: result.moves,
+                    nodesExplored: result.nodesExplored,
+                    timeMs: result.timeMs
+                });
+
+                // Préparer l'exécution animée
+                this.solutionMoves = result.moves;
+                this.solutionCurrentMove = 0;
+
+                // Petit délai pour laisser le temps de voir les stats
+                setTimeout(() => {
+                    this.executeNextSolutionMove();
+                }, 1000);
+                
+            } else if (result && result.moves.length === 0) {
+                console.log("Le cube est déjà résolu.");
+                statusPanel.showAlreadySolved();
+                this.isSolving = false;
+            } else {
+                console.error("❌ Aucune solution trouvée.");
+                statusPanel.showError("Aucune solution trouvée");
+                this.isSolving = false;
+            }
+        }, 50);
+    }
+
+    private executeNextSolutionMove() {
+        if (!this.cube || this.solutionCurrentMove >= this.solutionMoves.length) {
+            statusPanel.showSolved();
+            this.isSolving = false;
+            return;
+        }
+
+        const move = this.solutionMoves[this.solutionCurrentMove];
+        statusPanel.showExecuting(
+            this.solutionCurrentMove,
+            this.solutionMoves.length,
+            this.solutionMoves
+        );
+
+        this.cube.applyMoveSequence([move], () => {
+            this.render();
+            this.solutionCurrentMove++;
+            this.executeNextSolutionMove();
+        });
+    }
+
+    public executeMoves(moves: string[], callback?: () => void) {
+        if (!this.cube || this.isShuffling || this.isSolving) return;
         
         this.isSolving = true;
         this.cube.applyMoveSequence(moves, () => {
             this.isSolving = false;
             this.render();
-            console.log("Séquence terminée:", moves.join(" "));
             callback?.();
         });
     }
 
-    /**
-     * Retourne l'état logique actuel du cube
-     */
     public getLogicState() {
         return this.cube?.getLogicState();
     }
 
-    /**
-     * Vérifie si le cube est résolu
-     */
     public isCubeSolved(): boolean {
         return this.cube?.isLogicallySolved() ?? false;
-    }
-
-    private applySolutionMoves(
-        moves: Array<{ axisIndex: number; layerIndex: number; clockwise: boolean }>,
-        index: number,
-        callback: () => void
-    ) {
-        if (!this.cube || index >= moves.length) {
-            callback();
-            return;
-        }
-
-        const move = moves[index];
-        this.cube.performAnimatedRotation(move.axisIndex, move.layerIndex, move.clockwise, () => {
-            this.render();
-            setTimeout(() => {
-                this.applySolutionMoves(moves, index + 1, callback);
-            }, 100);
-        });
     }
 
     private render() {
@@ -228,16 +243,11 @@ class Rubiks {
 
     private startAnimation() {
         const animation = (time: number) => {
-            time /= 1000; // convertir en secondes
-            if (this.cube) {
-                // Petit mouvement de flottement
-                this.cube.position.y = Math.sin(time) * 0.2;
-            }
-
+            time /= 1000;
+            if (this.cube) this.cube.position.y = Math.sin(time) * 0.2;
             this.render();
             requestAnimationFrame(animation);
         };
-
         requestAnimationFrame(animation);
     }
 }

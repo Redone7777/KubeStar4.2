@@ -249,36 +249,45 @@ export function axisToMove(
     axisIndex: number,  // 0=X, 1=Y, 2=Z
     layerIndex: number, // 0 ou 1 pour 2×2
     clockwise: boolean, // Vu depuis le côté positif de l'axe
-    cubeOrder: number
+    cubeOrder: number,
+    turns: number
 ): string | null {
     if (cubeOrder !== 2) return null;
     
+    let baseMove: string | null = null;
+
     // Pour un 2×2: layer 0 = face négative, layer 1 = face positive
     const isPositive = layerIndex === 1;
     
     if (axisIndex === 1) { // Y
         if (isPositive) {
-            return clockwise ? 'U' : "U'";
+            baseMove = clockwise ? 'U' : "U'";
         } else {
-            return clockwise ? "D'" : 'D';  // D inversé car vu depuis Y+
+            baseMove = clockwise ? "D'" : 'D';  // D inversé car vu depuis Y+
         }
-    }
-    if (axisIndex === 0) { // X
+    } else if (axisIndex === 0) { // X
         if (isPositive) {
-            return clockwise ? 'R' : "R'";
+            baseMove = clockwise ? 'R' : "R'";
         } else {
-            return clockwise ? "L'" : 'L';  // L inversé car vu depuis X+
+            baseMove = clockwise ? "L'" : 'L';  // L inversé car vu depuis X+
         }
-    }
-    if (axisIndex === 2) { // Z
+    } else if (axisIndex === 2) { // Z
         if (isPositive) {
-            return clockwise ? 'F' : "F'";
+            baseMove = clockwise ? 'F' : "F'";
         } else {
-            return clockwise ? "B'" : 'B';  // B inversé car vu depuis Z+
+            baseMove = clockwise ? "B'" : 'B';  // B inversé car vu depuis Z+
         }
     }
     
-    return null;
+    if (!baseMove) {
+        return null;
+    }
+
+    if (turns === 2) {
+        return baseMove[0] + '2';
+    }
+    
+    return baseMove;
 }
 
 export { CORNER_FACELETS };

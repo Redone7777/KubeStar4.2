@@ -356,7 +356,7 @@ export class Cube extends Group {
         // Appliquer le(s) mouvement(s)
         const absQuarters = Math.abs(numQuarterTurns);
         for (let i = 0; i < absQuarters; i++) {
-            const move = axisToMove(axisIndex, layerIndex, clockwise, this.order);
+            const move = axisToMove(axisIndex, layerIndex, clockwise, this.order, 1);
             if (move) {
                 applyMove(this.logic, move);
             }
@@ -408,6 +408,24 @@ export class Cube extends Group {
         return ndcToScreen(pos, w, h);
     }
 
+    private snapVectorToGrid(vector: Vector3): Vector3 {
+        const ax = Math.abs(vector.x);
+        const ay = Math.abs(vector.y);
+        const az = Math.abs(vector.z);
+
+        if (ax > ay && ax > az) return new Vector3(Math.sign(vector.x), 0, 0);
+        if (ay > ax && ay > az) return new Vector3(0, Math.sign(vector.y), 0);
+        return new Vector3(0, 0, Math.sign(vector.z));
+    }
+
+    private snapPositionToGrid(vector: Vector3): Vector3 {
+        // Pour un cube 2x2, les positions des stickers sont des combinaisons de ±0.5 et ±1.0
+        const x = Math.round(vector.x * 2) / 2;
+        const y = Math.round(vector.y * 2) / 2;
+        const z = Math.round(vector.z * 2) / 2;
+        return new Vector3(x, y, z);
+    }
+
     /**
      * Mélanger le cube
      */
@@ -426,6 +444,7 @@ export class Cube extends Group {
         axisIndex: number, 
         layerIndex: number, 
         clockwise: boolean,
+        turns: number,
         callback: () => void
     ) {
         const order = this.order;
@@ -460,8 +479,8 @@ export class Cube extends Group {
             return;
         }
 
-        // Angle total de rotation (90 degrés)
-        const totalAngle = (Math.PI / 2) * (clockwise ? 1 : -1);
+        // Angle total de rotation (90 degrés * nombre de tours)
+        const totalAngle = (Math.PI / 2) * (clockwise ? turns : -turns);
         const rotateSpeed = Math.PI * 0.5 / 300; // Vitesse de rotation (90° en 300ms)
         let rotatedAngle = 0;
         let lastTick: number;
@@ -496,24 +515,20 @@ export class Cube extends Group {
                 fullRotateMat.makeRotationAxis(rotateAxisLocal, totalAngle);
                 
                 for (const square of rotateSquares) {
-                    // Appliquer la rotation aux normales et positions
-                    square.element.normal.applyMatrix4(fullRotateMat);
-                    square.element.pos.applyMatrix4(fullRotateMat);
+                    const finalPos = square.element.pos.clone().applyMatrix4(fullRotateMat);
+                    const finalNormal = square.element.normal.clone().applyMatrix4(fullRotateMat);
                     
-                    // Arrondir pour éviter les erreurs de virgule flottante
-                    square.element.normal.x = Math.round(square.element.normal.x);
-                    square.element.normal.y = Math.round(square.element.normal.y);
-                    square.element.normal.z = Math.round(square.element.normal.z);
-                    square.element.pos.x = Math.round(square.element.pos.x * 10) / 10;
-                    square.element.pos.y = Math.round(square.element.pos.y * 10) / 10;
-                    square.element.pos.z = Math.round(square.element.pos.z * 10) / 10;
+                    square.element.pos = this.snapPositionToGrid(finalPos);
+                    square.element.normal = this.snapVectorToGrid(finalNormal);
                 }
                 
                 // Synchroniser la logique pour 2×2
                 if (this.order === 2) {
-                    const move = axisToMove(axisIndex, layerIndex, clockwise, this.order);
-                    if (move) {
-                        applyMove(this.logic, move);
+                     for (let i = 0; i < turns; i++) {
+                        const move = axisToMove(axisIndex, layerIndex, clockwise, this.order, 1);
+                        if (move) {
+                            applyMove(this.logic, move);
+                        }
                     }
                 }
                 
@@ -537,10 +552,12 @@ export class Cube extends Group {
         const params = this.moveToAxisParams(move);
         
         if (params) {
-            this.performAnimatedRotation(params.axisIndex, params.layerIndex, params.clockwise, () => {
+            this.performAnimatedRotation(params.axisIndex, params.layerIndex, params.clockwise, params.turns, () => {
                 this.applyMoveSequence(rest, callback);
             });
         } else {
+            // Si le mouvement est invalide, on passe au suivant
+            console.warn(`Mouvement ignoré: ${move}`);
             this.applyMoveSequence(rest, callback);
         }
     }
@@ -548,26 +565,46 @@ export class Cube extends Group {
     /**
      * Convertit un move (ex: "R", "U'") en paramètres pour performAnimatedRotation
      */
-    private moveToAxisParams(move: string): { axisIndex: number, layerIndex: number, clockwise: boolean } | null {
-        const face = move[0];
-        const isPrime = move.includes("'");
-        const isDouble = move.includes("2");
-        
+    private moveToAxisParams(move: string): { axisIndex: number, layerIndex: number, clockwise: boolean, turns: number } | null {
+        if (!move || move.length < 1 || move.length > 2) {
+            return null;
+        }
+
+        const face = move[0].toUpperCase();
+        if (!['U', 'D', 'R', 'L', 'F', 'B'].includes(face)) {
+            return null;
+        }
+
+        const modifier = move.length > 1 ? move[1] : '';
+
+        let turns = 1;
+        let isPrime = false;
+
+        if (modifier === "'") {
+            isPrime = true;
+        } else if (modifier === '2') {
+            turns = 2;
+        } else if (modifier !== '') {
+            return null; // Mouvement invalide
+        }
+
         let axisIndex: number;
         let layerIndex: number;
-        let clockwise: boolean;
+        let baseClockwise: boolean;
         
         switch (face) {
-            case 'U': axisIndex = 1; layerIndex = 1; clockwise = !isPrime; break;
-            case 'D': axisIndex = 1; layerIndex = 0; clockwise = isPrime; break;
-            case 'R': axisIndex = 0; layerIndex = 1; clockwise = !isPrime; break;
-            case 'L': axisIndex = 0; layerIndex = 0; clockwise = isPrime; break;
-            case 'F': axisIndex = 2; layerIndex = 1; clockwise = !isPrime; break;
-            case 'B': axisIndex = 2; layerIndex = 0; clockwise = isPrime; break;
-            default: return null;
+            case 'U': axisIndex = 1; layerIndex = 1; baseClockwise = true; break;
+            case 'D': axisIndex = 1; layerIndex = 0; baseClockwise = false; break;
+            case 'R': axisIndex = 0; layerIndex = 1; baseClockwise = true; break;
+            case 'L': axisIndex = 0; layerIndex = 0; baseClockwise = false; break;
+            case 'F': axisIndex = 2; layerIndex = 1; baseClockwise = true; break;
+            case 'B': axisIndex = 2; layerIndex = 0; baseClockwise = false; break;
+            default: return null; // Ne devrait pas arriver
         }
         
-        return { axisIndex, layerIndex, clockwise };
+        const clockwise = baseClockwise !== isPrime;
+        
+        return { axisIndex, layerIndex, clockwise, turns };
     }
 
     public restore() {

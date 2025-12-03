@@ -1,18 +1,5 @@
 import Rubiks from "./rubiks";
-import { makeSolvedCube, applyMove, applyMovesSequence, isSolved, logicToFaceletArray, cloneLogic } from "./rubiks/core/cubeLogic";
-import { selfTest } from "./rubiks/core/testLogic";
-
-(window as any).cubeLogic = {
-    selfTest,
-    makeSolvedCube,
-    applyMove,
-    applyMovesSequence,
-    isSolved,
-    logicToFaceletArray,
-    cloneLogic
-};
-
-
+import { testRunner } from "./rubiks/util/testRunner";
 
 window.onload = () => {
     const container = document.getElementById("container");
@@ -23,31 +10,55 @@ window.onload = () => {
     const zoomOutEle = document.getElementById("zoom-out") as HTMLButtonElement;
     
     if (container) {
-        // Créer le Pocket Cube 2x2x2
+        // Initialisation de la scène 3D
         const rubiks = new Rubiks(container);
 
+        // Exposition globale pour le debug dans la console du navigateur
         (window as any).cube = {
+            // Contrôles du cube
             move: (...moves: string[]) => rubiks.executeMoves(moves),
-            moves: (moves: string[]) => rubiks.executeMoves(moves),
             state: () => rubiks.getLogicState(),
             isSolved: () => rubiks.isCubeSolved(),
             reset: () => rubiks.restore(),
-            shuffle: (n?: number) => rubiks.disorder(n),
             scramble: (n?: number) => rubiks.scramble(n),
-            solve: () => rubiks.solve()
+            solve: () => rubiks.solve(),
+            
+            // Suite de tests pour le mémoire
+            tests: testRunner,
+            runTests: () => testRunner.runAll(),
+            runComparison: (n?: number) => testRunner.comparison(n),
+            runDistribution: (n?: number) => testRunner.distribution(n),
+            runWorstCase: () => testRunner.worstCase(),
+            runValidation: (n?: number) => testRunner.validation(n)
         };
-        console.log("🎮 cube.move('R','U'), cube.scramble(10), cube.solve(), cube.reset()");
+        
+        console.log("🎲 Pocket Cube 2×2 - Prêt !");
+        console.log("─".repeat(50));
+        console.log("📦 Commandes disponibles :");
+        console.log("   cube.solve()          - Résoudre le cube");
+        console.log("   cube.scramble(10)     - Mélanger (10 coups)");
+        console.log("   cube.reset()          - Réinitialiser");
+        console.log("");
+        console.log("🧪 Tests pour le mémoire :");
+        console.log("   cube.runTests()       - Exécuter tous les tests");
+        console.log("   cube.runComparison(50)- Comparer BFS vs IDA*");
+        console.log("   cube.runDistribution(100) - Distribution des profondeurs");
+        console.log("   cube.runWorstCase()   - Tester les pires cas");
+        console.log("   cube.runValidation(50)- Valider les solutions");
+        console.log("─".repeat(50));
+
+        // --- Gestion des événements (Boutons) ---
 
         disorderEle.addEventListener("click", () => {
-            rubiks.disorder();
+            rubiks.disorder(); // Mélange
         });
 
         restore.addEventListener("click", () => {
-            rubiks.restore();
+            rubiks.restore(); // Reset visuel
         });
 
         solveEle.addEventListener("click", () => {
-            rubiks.solve();
+            rubiks.solve(); // Lancement de IDA*
         });
 
         zoomInEle.addEventListener("click", () => {
@@ -58,7 +69,7 @@ window.onload = () => {
             rubiks.zoomOut();
         });
 
-        // Zoom avec la molette de la souris
+        // Zoom molette
         container.addEventListener("wheel", (event) => {
             event.preventDefault();
             if (event.deltaY < 0) {
